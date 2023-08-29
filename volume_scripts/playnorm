@@ -1,0 +1,112 @@
+#!/bin/bash
+
+# Function to display usage information
+usage() {
+	echo "Usage: playnorm [audio_file] [volume_level]"
+	echo "	 or: playnorm [volume_level] [audio_file]"
+	echo " (Volume level is 0-100)"
+	exit 1
+}
+
+# Check if the right number of arguments are given
+if [ "$#" -ne 2 ]; then
+	usage
+fi
+
+# Parse the two arguments
+arg1="$1"
+arg2="$2"
+
+# Initialize variables for audio file and volume
+audio_file=""
+volume_level=""
+
+# Determine which argument is the audio file and which is the volume
+if [[ $arg1 == *"."* ]]; then
+	audio_file="$arg1"
+	volume_level="$arg2"
+elif [[ $arg2 == *"."* ]]; then
+	audio_file="$arg2"
+	volume_level="$arg1"
+else
+	usage
+fi
+
+# Validate that the volume level is a number between 0 and 100
+if ! [[ "$volume_level" =~ ^[0-9]+$ ]] || [ "$volume_level" -lt 0 ] || [ "$volume_level" -gt 100 ]; then
+	echo "Invalid volume level: must be a number between 0 and 100."
+	exit 1
+fi
+
+# Check if audio file exists
+if [ ! -f "$audio_file" ]; then
+	echo "Audio file '$audio_file' does not exist."
+	exit 1
+fi
+
+# Flag to check if system settings were changed
+changed_sys_settings=0
+
+# Get current system volume using 'volget'
+current_sys_volume=$(volget)
+
+# Detect if the value is in hexadecimal format
+if [[ $current_sys_volume == 0x* ]]; then
+	# Extract the hexadecimal digits and convert to decimal
+	hex_digits="${current_sys_volume#0x}"
+	current_sys_volume_decimal=$((16#$hex_digits))
+
+	# Convert to float [0,1]
+	current_sys_volume=$(echo "scale=5; $current_sys_volume_decimal / 65535.0" | bc)
+else
+	# Assume the value is already a float [0,1]
+	# Your existing handling code can remain the same
+	current_sys_volume_percent=$(echo "scale=2; $current_sys_volume * 100" | bc)
+fi
+
+
+# Get the current mute state using 'volmuteget'
+current_mute_state=$(volmuteget)
+# handle the deprecated on/off output
+if   [[ $current_mute_state = on ]]; then current_mute_state=1;
+elif [[ $current_mute_state = off ]]; then current_mute_state=0;
+fi
+
+# If muted, unmute the system
+if [ "$current_mute_state" -eq 1 ]; then
+	volmuteset 0
+	changed_sys_settings=1
+	volstore
+fi
+
+# Calculate desired play volume as a fraction
+desired_volume=$(echo "scale=2; $volume_level / 100" | bc)
+
+# Calculate and set the new system volume if needed
+if (( $(echo "$desired_volume > $current_sys_volume" | bc -l) )); then
+	if [ "$changed_sys_settings" -eq 0 ]; then
+		volstore
+	fi
+	echo "Force setting system volume to $desired_volume" >&2
+	volset $desired_volume
+	changed_sys_settings=1
+	play_vol=1.0
+else
+	# Calculate the play 'vol' parameter
+	play_vol=$(echo "scale=2; $desired_volume / $current_sys_volume" | bc)
+fi
+
+# Play the audio file with the calculated volume
+cat <<EOT
+	Playing:
+		play "$audio_file" vol $play_vol
+EOT
+play "$audio_file" vol $play_vol
+
+# Restore the original system volume and mute state if changed
+if [ "$changed_sys_settings" -eq 1 ]; then
+	volrestore
+fi
+
+# Exit successfully
+exit 0

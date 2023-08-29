@@ -1,0 +1,157 @@
+#!/bin/bash
+. ansi.sh
+whisperpluck_dir=~/src/whisperpluck
+whisperserver_dir=~/src/whisperpluck/server-flask
+whisper_venv_activate=~/venv/whisper/bin/activate
+txt_file="$whisperpluck_dir/cache/new.txt"
+bin_whisper_auto="$whisperpluck_dir/whisper-auto"
+bin_whisper_kill_rec="$whisperpluck_dir/whisper-kill-rec"
+bin_say="voice-piper-interactive"
+vol=30
+volstorefile="/tmp/patcmd-vol"
+
+cmds_yes_q=('yeah?' 'ready.' 'yes?' 'what?' 'yes sir?')
+
+losay () {
+	local str="$1"
+	volstore
+	volset "$vol" &>/dev/null
+	volmuteset 0
+	printf 'LOSAY(%s)\n' "$str"
+	printf '%s\n' "$str" | "$bin_say" &>/dev/null
+	volrestore
+}
+
+store_local_volume () {
+	if [[ $# -lt 1 ]]; then
+		echo "${bred}Error, store_local_volume called with no args$rst" >&2
+		losay "Error, store_local_volume called with no args"
+	else
+		printf '%s\n' "$1" > "$volstorefile"
+	fi
+}
+load_local_volume () {
+	if [[ ! -f "$volstorefile" ]]; then
+		echo "Setting initial volume in $volstorefile: $vol"
+		store_local_volume "$vol"
+	else
+		vol=$(<$volstorefile);
+		echo "Loaded stored volume from $volstorefile: $vol"
+	fi
+}
+
+check_whisper_daemon () {
+	if ! pgrep -f 'whisper.*flask.*run'; then
+		losay "Whisper daemon is not running. Trying to run it now."
+		(. "$whisper_venv_activate"; cd -- "$whisperserver_dir" && nohup flask run &>/dev/null &)
+		sleep 4
+		if pgrep -f 'whisper.*flask.*run'; then
+			losay "It seems to be running now. You may try a command again. Good luck."
+		else
+			losay "It seems like maybe it died. Sorry. Call tech support."
+		fi
+		exit
+	fi
+}
+
+say_cmd_rand () {
+	locmds=("$@")
+	local cnt=${#locmds}
+	local ri=$((RANDOM%cnt))
+	losay "${locmds[$ri]}"
+}
+
+local_init () {
+	load_local_volume
+	check_whisper_daemon
+}
+
+local_init
+say_cmd_rand "${cmds_yes_q[@]}"
+"$bin_whisper_auto" &
+whipid=$!
+echo "Whisper pid: $whipid"
+sleep 3.5
+"$bin_whisper_kill_rec"
+echo "Whisper is probably processing now"
+while true; do
+	if ps -p "$whipid" &>/dev/null; then
+		echo " Waiting for whisper to finish"
+		sleep .25
+	else
+		break
+	fi
+done
+echo
+echo "We got our result:"
+cmd=$(<"$txt_file")
+cmd=${cmd## } # strip and lowercase
+cmd=${cmd%% }
+# cmd=${cmd%%[.!,-]}
+cmd=${cmd,,}
+cmd=$(printf '%s\n' "$cmd" | tr -cd 'a-z0-9 ')
+
+cmd_match () {
+	if [[ $# -lt 1 ]]; then
+		losay "Sorry, there is an internal error with cmd_match. We received no pattern"
+		return 255
+	fi
+	local ptn="$1"
+	echo "Testing user '$cmd' against pattern '$ptn'"
+	if printf '%s\n' "$cmd" | grep -q -- "^$ptn\$"; then
+		return 0
+	fi
+	return 1
+}
+cmds_match () {
+	for i in "$@"; do
+		if cmd_match "$i"; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+day_suffix () {
+  case `date +%d` in
+    1|21|31) echo "st";;
+    2|22)    echo "nd";;
+    3|23)    echo "rd";;
+    *)       echo "th";;
+  esac
+}
+say_time () { losay "$(date +'%l:%M %p')"; }
+say_date () { losay "$(date +'%A, %B %d'"$(day_suffix)"' %Y')"; }
+get_suffix_number () {
+	local num=$(printf '%s\n' "$1" | perl -p -e 's/^.*?(\d+)\s*$/$1\n/;')
+	printf '%s\n' "$num"
+}
+set_local_volume_sfx () {
+	local newvol=$(get_suffix_number "$cmd")
+	if [[ $newvol =~ ^[0-9]+$ ]]; then
+		store_local_volume "$newvol"
+		losay "Setting volume to $newvol"
+	else
+		losay "We expected a number but we got: $newvol"
+	fi
+}
+
+#printf ' We heard you say: "%s"\n' "$cmd" | $bin_whisper_kill_rec
+echo "$bgblu$whi  Command: $yel$cmd  $rst"
+if cmds_match 'test' 'testing'; then
+	losay "Test successful." "Test successful. Good job!"
+elif cmd_match "fan on"; then
+	losay "Turning the fan on for 1 hour"
+elif cmds_match "time" "what time is it" "whats the time"; then
+	say_time
+elif cmds_match "date" "whats todays date" "whats the date today" "whats the date" "what day is it"; then
+	say_date
+elif cmds_match "set our volume to .*"; then
+	set_local_volume_sfx
+elif [[ $? -ne 255 ]]; then
+	losay "Sorry, we do not recognize the command $cmd"
+fi
+
+
+#echo "yeah?" | "$bin_say"
+

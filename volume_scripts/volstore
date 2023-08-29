@@ -1,0 +1,3 @@
+#!/bin/bash
+volget > ~/tmp/volume.store 2>/dev/null
+volmuteget > ~/tmp/volume.mute.store 2>/dev/null

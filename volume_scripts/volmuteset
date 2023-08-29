@@ -1,0 +1,34 @@
+#!/bin/bash
+
+state=''
+
+if [[ "$#" -lt 1 ]]; then
+	cat <<-'EOT'
+		Set mute state current default audio output (sink)
+		Usage: volmuteset 0
+		       volmuteset off
+		       volmuteset 1
+		       volmuteset on
+		'0' or 'off' both UNMUTE.  '1' or 'on' both mute
+		See volmuteget for getting the value
+		EOT
+	exit 0
+elif [[ "$1" = 0 ]]; then
+	state=off
+elif [[ "$1" = 1 ]]; then
+	state=on
+elif [[ "$1" = on  ||  "$1" = off ]]; then
+	state="$1"
+else
+	echo "We need an acceptable mute state: 0, off, 1, on" >&2
+	exit 1
+fi
+
+echo "Mute state: $state" >&2
+
+echo "Sink: $sink" >&2
+echo "pactl set-sink-mute '$sink' '$state'" >&2
+sink=$(pactl info | grep 'Default Sink' | sed -e 's/^.*: //')
+pactl set-sink-mute "$sink" "$state"
+
+

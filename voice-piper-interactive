@@ -1,0 +1,49 @@
+#!/bin/bash
+piper=~/lib/voice/tts/piper/piper
+if [[ ! -x $piper ]]; then
+	echo "No piper bin at: $piper" >&2
+	exit
+fi
+voicedir=~/data/models/onyx
+model=~/data/models/onyx/en_US-ryan-high.onnx
+
+echo "Voices:" >&2
+cd "$voicedir" && find . -type d | grep 'onnx$' | sed -e 's/^/  /' >&2
+
+declare -A models
+
+models=(
+	[u]="$model"
+	[e]="$model"
+)
+
+echo
+echo "Select model during typng by prefixing line with 'm:...'" >&2
+for l in "${!models[@]}"; do
+	echo " $l: ${models[$l]}"; >&2
+done
+
+echo
+echo "Text me, one per line:" >&2
+umask 0177
+wavtmp="/tmp/tts.wav"
+while read -e txt; do
+	# txt="${txt// /+}"
+	printf 'You entered: {{%s}}\n' "$txt" >&2
+	pfx=$(printf "%s" "$txt" | sed -e 's/:.*$//')
+	if [[ -n "${models[$pfx]}" ]]; then
+		model="$voicedir/${models[$pfx]}"
+		txt=$(printf "%s" "$txt" | sed -e 's/^[^:]\+//;')
+	fi
+	cat <<-EOT >&2
+		Running piper:
+		printf '%s\n' "$txt" | "$piper" \\
+			--model "$model" \\
+			--output_file "$wavtmp"
+		EOT
+	printf '%s\n' "$txt" | "$piper" \
+		--model "$model" \
+		--output_file "$wavtmp"
+	ls -lgG -- "$wavtmp"
+	play "$wavtmp"
+done

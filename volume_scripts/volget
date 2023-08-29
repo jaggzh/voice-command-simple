@@ -1,0 +1,80 @@
+#!/bin/bash
+scriptname="${0##*/}"
+
+# Check if WirePlumber is available (vs. PulseAudio)
+if which wpctl >/dev/null; then USE_PA=; else USE_PA=1; fi
+
+shopt -s expand_aliases
+alias eggzit='[[ "${BASH_SOURCE[0]}" != "${0}" ]] && echo "Script is being sourced" || echo "Script is a subshell"'
+o_full=
+o_help=
+o_verbose=
+while [[ "$#" -gt 0 ]]; do
+	v="$1"
+	shift
+	if [[ "$v" =~ ^(--full|-f)$ ]]; then
+		o_full=1
+	elif [[ "$v" =~ ^(-v|--verbose)$ ]]; then
+		o_verbose=1
+	elif [[ "$v" =~ ^(-h|--help)$ ]]; then
+		o_help=1
+	fi
+done
+if [[ -n "$o_help" ]]; then
+	cat <<-'EOT'
+		Get volume of current default audio output (sink)
+		Usage: volget [-v|--verbose|-f|--full]
+			   volmuteget (outputs 'yes' or 'no')
+		If this script has the word 'mute' in it it returns the mute status.
+		Anything else and it returns volume.
+		Volume output:
+		  Default behavior is just to spit out the hex volume value.
+		  All options mean the same thing; they change the behavior to
+		  spit out the full 'pacmd dump' line for setting the volume.
+		Mute output mode:
+		  Outputs 'yes' or 'no'
+
+		Options:
+		  -f --full     Output the full matching pacmd line of output
+		  -v --verbose
+		  -h --help     This help.
+		EOT
+	eggzit
+fi
+
+[[ -n "$o_verbose" ]] && echo "Full line requested: $o_full"
+
+# Get mute state (line of text)
+#   Pulseaudio version:
+if [[ -n "$USE_PA" ]]; then
+	sink=$( pacmd dump | grep set-default-sink | cut -d' ' -f 2 )
+	[[ -n "$o_verbose" ]] && echo "Sink: $sink" >&2
+	if [[ "$scriptname" = *mute* ]]; then
+		line=$( pacmd dump | grep "set-sink-mute $sink" )
+	else # volume (not mute)
+		line=$( pacmd dump | grep "set-sink-volume $sink" )
+	fi
+	[[ -n "$o_verbose" ]] && echo "Line: $line" >&2
+
+	if [[ -n "$o_full" ]]; then
+		printf '%s\n' "$line"
+	else
+		printf '%s\n' "$line" | cut -d' ' -f 3
+	fi
+else # pipewire + wireplumber version:
+	if [[ "$scriptname" = *mute* ]]; then
+		if wpctl get-volume @DEFAULT_AUDIO_SINK@ |
+				grep -q 'MUTED'; then
+			line=1
+		else
+			line=0
+		fi
+	else # volume (note mute)
+		line=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ |
+			cut -d' ' -f 2)
+	fi
+	printf '%s\n' "$line"
+fi
+
+[[ -n "$o_verbose" ]] && echo "Line: $line" >&2
+

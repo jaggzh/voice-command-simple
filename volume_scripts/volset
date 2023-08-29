@@ -1,0 +1,59 @@
+#!/bin/bash
+# wireplumber test
+if which wpctl >/dev/null; then USE_PA=; else USE_PA=1; fi
+
+if [[ "$#" -lt 1 ]]; then
+	cat <<-'EOT'
+		Set volume of current default audio output (sink)
+		Usage: volset 0x0 - 0xffff
+		       volset 0-100
+		       volset [0.0 - 1.0]
+		EOT
+	exit 0
+elif [[ "$1" =~ ^[0-9]+$ ]]; then
+	echo 'Percentage provided' >&2
+	# Set bc output hex; no decimals; scale percentage to 16 bit
+	if [[ -n "$USE_PA" ]]; then
+		vol="0x"$(bc <<<"obase=16; scale=0; 65536*$1/100")
+	else
+		vol="$1%"  # hand off to wpctl which handles '%' values
+	fi
+elif [[ "$1" = '0x'* ]]; then
+	echo 'Hex provided' >&2
+	if [[ -n "$USE_PA" ]]; then
+		vol="$1"
+	else
+		vol=${1#0x}  # Strip for bc
+		vol=${vol^^} # Uppercase
+		vol=$(bc <<<"ibase=16; scale=2; $vol/FFFF")
+	fi
+elif [[	   $1 =~ ^0\.[0-9]+$ || $1 =~ ^\.[0-9]+$
+	    || $1 == '1.0' || $1 == '0.0' ]]; then
+	echo 'Float provided' >&2
+	if [[ -n "$USE_PA" ]]; then # Convert to hex
+		vol="0x"$(bc <<<"obase=16; scale=0; 65535*$1" | sed -e 's/\..*$//')
+	else
+		vol="$1"
+	fi
+else
+	echo "We need a float [0.0-1.0], a 16 bit hex value," >&2
+	echo "or a number 0-100, not {$1} ...whatever that is." >&2
+	exit 1
+fi
+
+echo "Volume: $vol" >&2
+
+# Set volume
+#   Pulseaudio version:
+if [[ -n "$USE_PA" ]]; then
+	sink=$( pacmd dump | grep set-default-sink | cut -d' ' -f 2 )
+	echo "Sink: $sink" >&2
+
+	echo "pacmd set-sink-volume '$sink' '$vol'" >&2
+	pacmd set-sink-volume "$sink" "$vol"
+else
+	# wpctl set-volume ID VOL[%][-/+]
+	# Get-volume example: wpctl get-volume @DEFAULT_AUDIO_SINK@
+	wpctl set-volume @DEFAULT_AUDIO_SINK@ "$vol"
+fi
+

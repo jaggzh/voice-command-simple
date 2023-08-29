@@ -1,0 +1,3 @@
+#!/bin/bash
+volset $(<~/tmp/volume.store) 2>/dev/null
+volmuteset $(<~/tmp/volume.mute.store) 2>/dev/null
